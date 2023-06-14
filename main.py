@@ -1,5 +1,6 @@
 from hitman.hitman import HC, HitmanReferee, complete_map_example
 from pprint import pprint
+from solver import search
 
 
 def phase1_run(hr):
@@ -179,13 +180,14 @@ def main():
     pprint(history)
 
     status = hr.start_phase2()
-    pprint(status)
-    phase2_run(hr)
-    _, score, history = hr.end_phase2()
-    pprint(score)
-    pprint(history)
+    # pprint(status)
+    pprint("fin : ")
+    pprint(search(hr))
+    # phase2_run(hr)
+    # _, score, history = hr.end_phase2()
+    # pprint(score)
+    # pprint(history)
 
 
 if __name__ == "__main__":
     main()
-
