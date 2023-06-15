@@ -180,13 +180,13 @@ def main():
     pprint(history)
 
     status = hr.start_phase2()
-    # pprint(status)
+    pprint(status)
     pprint("fin : ")
-    pprint(search(hr))
-    # phase2_run(hr)
-    # _, score, history = hr.end_phase2()
-    # pprint(score)
-    # pprint(history)
+    # pprint(search(hr))
+    phase2_run(hr)
+    _, score, history = hr.end_phase2()
+    pprint(score)
+    pprint(history)
 
 
 if __name__ == "__main__":
