@@ -15,8 +15,8 @@ nb_lignes = 5
 nb_colonnes = 4
 nb_gardes = 1
 nb_civil = 2
-nb_clause = 17 * nb_colonnes * nb_lignes
-vars = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+nb_clause = 13 * nb_colonnes * nb_lignes
+vars = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 
 example: Map = [
     [3, 1, 1, 1, 12],
@@ -49,7 +49,7 @@ def exec_gophersat(
 
 
 def cell_to_variable(i: int, j: int, val: int) -> int:
-    return nb_lignes * nb_colonnes * i + 17 * j + val
+    return nb_lignes * nb_colonnes * i + 13 * j + val
 
 
 def unique(vars: List[int]) -> List[List[int]]:
@@ -88,7 +88,7 @@ def create_unique_constraints() -> List[List[int]]:
     for c in range(nb_lignes):
         for j in range(nb_colonnes):
             sublist = []
-            for i in range(17):
+            for i in range(13):
                 sublist.append(cell_to_variable(i, j, c))
             list.append(sublist)
     return list
