@@ -26,7 +26,7 @@ def write_dimacs_file(dimacs: str, filename: str):
     with open(filename, "w+", newline="") as cnf:
         cnf.write(dimacs)
 
-
+#appel gophersat
 def exec_gophersat(
     filename: str, cmd: str = "gophersat", encoding: str = "utf8"
 ) -> Tuple[bool, List[int]]:

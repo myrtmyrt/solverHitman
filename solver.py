@@ -101,7 +101,8 @@ def turn_anti_clockwise(state: State) -> State:
         orientation = HC.S
     return state._replace(orientation=orientation)
 
-#est ce qu'il faut garder les fonctions de phase 1 et 2 dans le solver ou les mettre dans le referee ?
+
+# est ce qu'il faut garder les fonctions de phase 1 et 2 dans le solver ou les mettre dans le referee ?
 def start_phase2() -> State:
     state = State()
     state.phase = 2
