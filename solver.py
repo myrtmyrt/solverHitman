@@ -1,25 +1,10 @@
 from pprint import pprint
 from typing import Dict, Callable, List
 from collections import deque, namedtuple
-from hitman.hitman import HitmanReferee, HC, complete_map_example, world_example
+from hitman.hitman import HitmanReferee, HC, world_example
+from collections import defaultdict
+import time
 
-"""
-state:
-{
-            "status": err,
-            "phase": self.__phase,
-            "guard_count": self.__guard_count,
-            "civil_count": self.__civil_count,
-            "m": self.__m,
-            "n": self.__n,
-            "position": self.__pos,
-            "orientation": self.__orientation,
-            "vision": self.__get_vision(),
-            "hear": self.__get_listening(),
-            "penalties": self.__phase1_penalties,
-            "is_in_guard_range": self.__is_in_guard_range,
-        }
-"""
 State = namedtuple(
     "State",
     [
@@ -54,15 +39,32 @@ def get_offset(state: State) -> (int, int):
 world = world_example
 
 
-def get_world_content(x: int, y: int):
-    # provisoire
-    return world[len(world) - y - 1][x]
+
+# def get_world_content(state: State, x: int, y: int):
+#     if x > m(state) or x < 0 or y > n(state) or y < 0:
+#         return HC.WALL
+#     return state.world[len(state.world) - y - 1][x]
+
+
+def get_world_content(state: State, x: int, y: int):
+    if x >= n(state) or x < 0 or y >= m(state) or y < 0:
+        return HC.WALL
+    return state.world[m(state) - y - 1][x]
+
+
+def m(state: State) -> int:
+    return len(state.world)
+
+
+def n(state: State) -> int:
+    return len(state.world[0])
 
 
 def move(state: State) -> State:
     offset_x, offset_y = get_offset(state)
     x, y = state.position
-    if get_world_content(x + offset_x, y + offset_y) not in [
+    # print("moving to x: ", x + offset_x, " y: ", y + offset_y)
+    if get_world_content(state, x + offset_x, y + offset_y) not in [
         HC.EMPTY,
         HC.PIANO_WIRE,
         HC.CIVIL_N,
@@ -102,124 +104,232 @@ def turn_anti_clockwise(state: State) -> State:
     return state._replace(orientation=orientation)
 
 
-# est ce qu'il faut garder les fonctions de phase 1 et 2 dans le solver ou les mettre dans le referee ?
 def start_phase2() -> State:
-    state = State()
-    state.phase = 2
-    state.pos = (0, 0)
-    state.orientation = HC.N
+    state = State(
+        status="OK",
+        phase=2,
+        position=(0, 0),
+        orientation=HC.N,
+        has_weapon=False,
+        has_suit=False,
+        suit_on=False,
+        is_target_down=False,
+        world=world_example_tuple,
+    )
     return state
 
 
-def end_phase2(state: State):
-    if not state.is_target_down or not state.pos == (0, 0):
-        return False, "Err: finish the mission and go back to (0,0)", []
-    self.__phase = 0
-    return True, f"Your score is {- self.__phase2_penalties}", self.__phase2_history
+def update_world_content(state: State, x: int, y: int, new_content: HC) -> State:
+    world = list(list(line) for line in state.world)  # convert
+    world[m(state) - y - 1][x] = new_content  # update content
+    new_state = state._replace(world=tuple(tuple(line) for line in world))  # convert
+    return new_state
 
 
-def kill_target(self):
-    if self.__phase != 2:
+def kill_target(state: State) -> State:
+    if state.phase != 2:
         raise ValueError("Err: invalid phase")
 
-    self.__add_history("Kill Target")
-    x, y = self.__pos
-    if self.__get_world_content(x, y) != HC.TARGET or not self.__has_weapon:
-        return self.__get_status_phase_2("Err: invalid move")
+    x, y = state.position
+    if get_world_content(state, x, y) != HC.TARGET or not state.has_weapon:
+        return state._replace(status="Err: invalid move")
 
-    self.__update_world_content(x, y, HC.EMPTY)
-    self.__is_target_down = True
+    new_state = state._replace(is_target_down=True)
+    update_world_content(new_state, x, y, HC.EMPTY)
 
-    return self.__get_status_phase_2()
+    return new_state
 
 
-def neutralize_guard(self):
-    if self.__phase != 2:
+def get_guard_offset(guard):
+    if guard == HC.GUARD_N:
+        offset = 0, 1
+    elif guard == HC.GUARD_E:
+        offset = 1, 0
+    elif guard == HC.GUARD_S:
+        offset = 0, -1
+    elif guard == HC.GUARD_W:
+        offset = -1, 0
+
+    return offset
+
+
+def get_guard_vision(state: State, guard_x, guard_y, dist=2):
+    guard = get_world_content(state, guard_x, guard_y)
+    offset_x, offset_y = get_guard_offset(guard)
+    pos = (guard_x, guard_y)
+    x, y = pos
+    vision = []
+    for _ in range(0, dist):
+        pos = x + offset_x, y + offset_y
+        x, y = pos
+        if x >= n(state) or y >= m(state) or x < 0 or y < 0:
+            break
+        vision.append((pos, get_world_content(state, x, y)))
+        if vision[-1][1] != HC.EMPTY:
+            break
+    return vision
+
+
+def compute_guards(
+    state: State,
+) -> Dict[Tuple[int, int], List[Tuple[Tuple[int, int], HC]]]:
+    locations = {}
+    for l_index, l in enumerate(state.world):
+        for c_index, c in enumerate(l):
+            if c == HC.GUARD_N or c == HC.GUARD_E or c == HC.GUARD_S or c == HC.GUARD_W:
+                guard_x, guard_y = (c_index, m(state) - l_index - 1)
+                locations[(guard_x, guard_y)] = get_guard_vision(
+                    state, guard_x, guard_y
+                )
+    return locations
+
+
+def get_civil_offset(civil):
+    if civil == HC.CIVIL_N:
+        offset = 0, 1
+    elif civil == HC.CIVIL_E:
+        offset = 1, 0
+    elif civil == HC.CIVIL_S:
+        offset = 0, -1
+    elif civil == HC.CIVIL_W:
+        offset = -1, 0
+
+    return offset
+
+
+def get_civil_vision(state: State, civil_x, civil_y):
+    civil = get_world_content(state, civil_x, civil_y)
+    offset_x, offset_y = get_civil_offset(civil)
+    pos = (civil_x, civil_y)
+    x, y = pos
+    vision = [(pos, get_world_content(state, x, y))]
+
+    pos = x + offset_x, y + offset_y
+    x, y = pos
+    if n(state) > x >= 0 and m(state) > y >= 0:
+        vision.append((pos, get_world_content(state, x, y)))
+    return vision
+
+
+def compute_civils(
+    state: State,
+) -> Dict[Tuple[int, int], List[Tuple[Tuple[int, int], HC]]]:
+    locations = {}
+    for l_index, l in enumerate(state.world):
+        for c_index, c in enumerate(l):
+            if c == HC.CIVIL_N or c == HC.CIVIL_E or c == HC.CIVIL_S or c == HC.CIVIL_W:
+                civil_x, civil_y = (c_index, m(state) - l_index - 1)
+                locations[(civil_x, civil_y)] = get_civil_vision(
+                    state, civil_x, civil_y
+                )
+    return locations
+
+
+def neutralize_guard(state: State) -> State:
+    if state.phase != 2:
         raise ValueError("Err: invalid phase")
 
-    self.__add_history("Neutralize Guard")
-    self.__phase2_penalties += 1
-    self.__phase2_penalties += 5 * self.__seen_by_guard_num()
+    offset_x, offset_y = get_offset(state)
+    x, y = state.position
 
-    offset_x, offset_y = self.__get_offset()
-    x, y = self.__pos
-
-    if self.__get_world_content(x + offset_x, y + offset_y) not in [
+    if get_world_content(state, x + offset_x, y + offset_y) not in [
         HC.GUARD_N,
         HC.GUARD_E,
         HC.GUARD_S,
         HC.GUARD_W,
-    ] or (x, y) in [pos for (pos, _) in self.__guards[(x + offset_x, y + offset_y)]]:
-        return self.__get_status_phase_2("Err: invalid move")
+    ] or (x, y) in [
+        pos for (pos, _) in compute_guards(state)[(x + offset_x, y + offset_y)]
+    ]:
+        return state._replace(status="Err: invalid move")
+    new_state = state._replace()
+    update_world_content(new_state, x + offset_x, y + offset_y, HC.EMPTY)
 
-    self.__update_world_content(x + offset_x, y + offset_y, HC.EMPTY)
-    self.__guard_count -= 1
-
-    return self.__get_status_phase_2()
+    return new_state
 
 
-def neutralize_civil(self):
-    if self.__phase != 2:
+def neutralize_civil(state: State) -> State:
+    if state.phase != 2:
         raise ValueError("Err: invalid phase")
 
-    self.__add_history("Neutralize Civil")
-
-    offset_x, offset_y = self.__get_offset()
-    x, y = self.__pos
-    if self.__get_world_content(x + offset_x, y + offset_y) not in [
+    offset_x, offset_y = get_offset(state)
+    x, y = state.position
+    if get_world_content(state, x + offset_x, y + offset_y) not in [
         HC.CIVIL_N,
         HC.CIVIL_E,
         HC.CIVIL_S,
         HC.CIVIL_W,
-    ] or (x, y) in [pos for (pos, _) in self.__civils[(x + offset_x, y + offset_y)]]:
-        return self.__get_status_phase_2("Err: invalid move")
+    ] or (x, y) in [
+        pos for (pos, _) in compute_civils(state)[(x + offset_x, y + offset_y)]
+    ]:
+        return state._replace(status="Err: invalid move")
 
-    self.__update_world_content(x + offset_x, y + offset_y, HC.EMPTY)
-    self.__civil_count -= 1
+    new_state = state._replace()
+    update_world_content(new_state, x + offset_x, y + offset_y, HC.EMPTY)
 
-    return self.__get_status_phase_2()
+    return new_state
 
 
-def take_suit(self):
-    if self.__phase != 2:
+# def neutralize_civil(state: State) -> State:
+#     if state.phase != 2:
+#         raise ValueError("Err: invalid phase")
+#
+#     offset_x, offset_y = get_offset(state)
+#     x, y = state.position
+#     target_x = x + offset_x
+#     target_y = y + offset_y
+#
+#     target_content = get_world_content(state, target_x, target_y)
+#
+#     if (
+#         target_content != HC.CIVIL_N
+#         and target_content != HC.CIVIL_S
+#         and target_content != HC.CIVIL_E
+#         and target_content != HC.CIVIL_W
+#     ):
+#         return state._replace(status="Err: invalid target")
+#
+#     new_state = update_world_content(state, target_x, target_y, HC.EMPTY)
+#     return new_state
+
+
+def take_suit(state: State) -> State:
+    if state.phase != 2:
         raise ValueError("Err: invalid phase")
 
-    self.__add_history("Take Suit")
+    x, y = state.position
+    if get_world_content(state, x, y) != HC.SUIT:
+        return state._replace(status="Err: invalid move")
 
-    x, y = self.__pos
-    if self.__get_world_content(x, y) != HC.SUIT:
-        return self.__get_status_phase_2("Err: invalid move")
+    new_state = state._replace(has_suit=True)
+    update_world_content(new_state, x, y, HC.EMPTY)
 
-    self.__has_suit = True
-    self.__update_world_content(x, y, HC.EMPTY)
-
-    return self.__get_status_phase_2()
+    return new_state
 
 
-def take_weapon(self):
-    if self.__phase != 2:
+def take_weapon(state: State) -> State:
+    if state.phase != 2:
         raise ValueError("Err: invalid phase")
 
-    x, y = self.__pos
-    if self.__get_world_content(x, y) != HC.PIANO_WIRE:
-        return self.__get_status_phase_2("Err: invalid move")
+    x, y = state.position
+    if get_world_content(state, x, y) != HC.PIANO_WIRE:
+        return state._replace(status="Err: invalid move")
 
-    self.__has_weapon = True
-    self.__update_world_content(x, y, HC.EMPTY)
+    new_state = state._replace(has_weapon=True)
+    update_world_content(new_state, x, y, HC.EMPTY)
 
-    return self.__get_status_phase_2()
+    return new_state
 
 
-def put_on_suit(self):
-    if self.__phase != 2:
+def put_on_suit(state: State) -> State:
+    if state.phase != 2:
         raise ValueError("Err: invalid phase")
 
-    if not self.__has_suit:
-        return self.__get_status_phase_2("Err: invalid move")
+    if not state.has_suit:
+        return state._replace(status="Err: invalid move")
 
-    self.__suit_on = True
+    new_state = state._replace(suit_on=True)
 
-    return self.__get_status_phase_2()
+    return new_state
 
 
 def generate_list_actions(hr: HitmanReferee) -> Dict[str, Callable]:
@@ -252,50 +362,84 @@ def dict_to_tuple(dict):
     )
 
 
-def search(hr: HitmanReferee) -> List[str]:
-    actions = generate_list_actions(hr)
-    frontier = deque()
+def search() -> Tuple[List[str], State]:
+    actions = {
+        "move": move,
+        "turn_clockwise": turn_clockwise,
+        "turn_anti_clockwise": turn_anti_clockwise,
+        "kill_target": kill_target,
+        "neutralize_guard": neutralize_guard,
+        "neutralize_civil": neutralize_civil,
+        "take_suit": take_suit,
+        "take_weapon": take_weapon,
+        "put_on_suit": put_on_suit,
+    }
+    frontier = stack()  # deque is BFS, stack is DFS, heap is A*
     visited = set()
-    frontier.append(hr.start_phase2())
-    to_expand = frontier.pop()
-    print(to_expand)
-    while not to_expand["has_weapon"]:
-        to_expand_tuple = dict_to_tuple(to_expand)
-        if to_expand_tuple not in visited:
+    path = defaultdict(
+        list
+    )  # Utiliser defaultdict pour stocker les actions associées à chaque prédécesseur
+    frontier.append(start_phase2())
+    to_expand: State = frontier.pop()
+    while not (to_expand.is_target_down and to_expand.position == (0, 0)):
+        if to_expand not in visited:
             for action_name, action in actions.items():
-                print("=== NEW ACTION ===")
-                print(hr.__pos)
-                hr.__pos = to_expand["position"]
-                hr.__orientation = to_expand["orientation"]
-                hr.__has_weapon = to_expand["has_weapon"]
-                hr.__has_suit = to_expand["has_suit"]
-                hr.__is_target_down = to_expand["is_target_down"]
-                print(hr.__pos)
-                new_state = action()
-                print(hr.__pos)
-                pprint(action_name)
-                # pprint(new_state["position"])
-                pprint(new_state["orientation"])
-                pprint(new_state["status"])
-                if new_state["status"] == "OK":
+                new_state = action(to_expand)
+                if new_state.status == "OK":
+                    path[new_state].append((action_name, to_expand))
                     frontier.append(new_state)
-                    visited.add(to_expand_tuple)
+                    visited.add(to_expand)
         else:
             to_expand = frontier.pop()
-    print("has weapon")
-    return to_expand
+
+    last_state = to_expand
+
+    actions = []
+    while to_expand != start_phase2():
+        action, predecessor = path[to_expand][0]
+        actions.append(action)
+        to_expand = predecessor
+    actions.reverse()
+
+    return actions, last_state
+
+
+def phase2_run(hr, actions):
+    for action in actions:
+        if action == "move":
+            status = hr.move()
+            pprint(status)
+        elif action == "turn_clockwise":
+            status = hr.turn_clockwise()
+            pprint(status)
+        elif action == "turn_anti_clockwise":
+            status = hr.turn_anti_clockwise()
+            pprint(status)
+        elif action == "take_suit":
+            status = hr.take_suit()
+            pprint(status)
+        elif action == "take_weapon":
+            status = hr.take_weapon()
+            pprint(status)
+        elif action == "kill_target":
+            status = hr.kill_target()
+            pprint(status)
 
 
 def main():
+    actions, last_state = search()
+    print(last_state)
+    # pprint(actions)
     hr = HitmanReferee()
-    status = hr.start_phase2()  # Appeler start_phase2 sur l'instance hr
-    # pprint(search(hr))
-    search(hr)  # Passer l'instance hr à la fonction search
-    pprint("fin : ")
-    _, score, history = hr.end_phase2()  # Appeler end_phase2 sur l'instance hr
+    status = hr.start_phase2()
+    phase2_run(hr, actions)
+    _, score, history = hr.end_phase2()
     pprint(score)
-    pprint(history)
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     main()
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print("Temps d'exécution :", execution_time, "secondes")

@@ -1,6 +1,6 @@
-from hitman.hitman import HC, HitmanReferee, complete_map_example
-from pprint import pprint
+from hitman.hitman import HC, HitmanReferee
 from solver import search
+import pprint
 
 
 def phase1_run(hr):
