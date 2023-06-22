@@ -4,6 +4,7 @@ from collections import deque, namedtuple
 from hitman.hitman import HitmanReferee, HC, world_example
 from collections import defaultdict
 import time
+from heapq import heappop, heappush
 
 State = namedtuple(
     "State",
@@ -362,6 +363,55 @@ def dict_to_tuple(dict):
     )
 
 
+# def search() -> Tuple[List[str], State]:
+#     actions = {
+#         "move": move,
+#         "turn_clockwise": turn_clockwise,
+#         "turn_anti_clockwise": turn_anti_clockwise,
+#         "kill_target": kill_target,
+#         "neutralize_guard": neutralize_guard,
+#         "neutralize_civil": neutralize_civil,
+#         "take_suit": take_suit,
+#         "take_weapon": take_weapon,
+#         "put_on_suit": put_on_suit,
+#     }
+#     frontier = stack()  # deque is BFS, stack is DFS, heap is A*
+#     visited = set()
+#     path = defaultdict(
+#         list
+#     )  # Utiliser defaultdict pour stocker les actions associées à chaque prédécesseur
+#     frontier.append(start_phase2())
+#     to_expand: State = frontier.pop()
+#     while not (to_expand.is_target_down and to_expand.position == (0, 0)):
+#         if to_expand not in visited:
+#             for action_name, action in actions.items():
+#                 new_state = action(to_expand)
+#                 if new_state.status == "OK":
+#                     path[new_state].append((action_name, to_expand))
+#                     frontier.append(new_state)
+#                     visited.add(to_expand)
+#         else:
+#             to_expand = frontier.pop()
+#
+#     last_state = to_expand
+#
+#     actions = []
+#     while to_expand != start_phase2():
+#         action, predecessor = path[to_expand][0]
+#         actions.append(action)
+#         to_expand = predecessor
+#     actions.reverse()
+#
+#     return actions, last_state
+
+
+def manhattan_distance(position1: Tuple[int, int], position2: Tuple[int, int]) -> int:
+    # Calculer la distance de Manhattan entre deux positions
+    x1, y1 = position1
+    x2, y2 = position2
+    return int(fabs(x1 - x2) + fabs(y1 - y2))
+
+
 def search() -> Tuple[List[str], State]:
     actions = {
         "move": move,
@@ -374,34 +424,82 @@ def search() -> Tuple[List[str], State]:
         "take_weapon": take_weapon,
         "put_on_suit": put_on_suit,
     }
-    frontier = stack()  # deque is BFS, stack is DFS, heap is A*
+    frontier = []  # Utiliser une heap pour l'algorithme A*
     visited = set()
     path = defaultdict(
         list
     )  # Utiliser defaultdict pour stocker les actions associées à chaque prédécesseur
-    frontier.append(start_phase2())
-    to_expand: State = frontier.pop()
-    while not (to_expand.is_target_down and to_expand.position == (0, 0)):
+
+    # Définir les états initiaux
+    start_state = start_phase2()
+    start_position = start_state.position
+
+    # Fonction d'estimation du coût restant (heuristique)
+    def heuristic(state):
+        if not state.has_weapon:
+            weapon_distance = manhattan_distance(
+                state.position, get_weapon_position(world_example)
+            )
+        else:
+            weapon_distance = 0
+        if not state.is_target_down:
+            target_distance = manhattan_distance(
+                state.position, get_target_position(world_example)
+            )
+        else:
+            target_distance = 0
+        return (
+            weapon_distance
+            + target_distance
+            + manhattan_distance(state.position, start_position)
+        )
+
+    # Ajouter l'état initial à la heap avec un coût de 0
+    heappush(frontier, (0, 0, start_state))  # (total_cost, cost_so_far, state)
+
+    while frontier:
+        _, cost, to_expand = heappop(frontier)
+
+        if to_expand.is_target_down and to_expand.position == start_position:
+            # L'objectif est atteint, construire la liste d'actions
+            last_state = to_expand
+            actions = []
+            while to_expand != start_phase2():
+                action, predecessor = path[to_expand][0]
+                actions.append(action)
+                to_expand = predecessor
+            actions.reverse()
+
+            return actions, last_state
+
         if to_expand not in visited:
             for action_name, action in actions.items():
                 new_state = action(to_expand)
                 if new_state.status == "OK":
-                    path[new_state].append((action_name, to_expand))
-                    frontier.append(new_state)
+                    path[new_state] = (action_name, to_expand)
+                    new_cost = cost + 1  # Coût fixe pour chaque action
+                    total_cost = new_cost + heuristic(new_state)
+                    heappush(frontier, (total_cost, new_cost, new_state))
                     visited.add(to_expand)
-        else:
-            to_expand = frontier.pop()
 
-    last_state = to_expand
+    # Aucun chemin trouvé
+    return [], None
 
-    actions = []
-    while to_expand != start_phase2():
-        action, predecessor = path[to_expand][0]
-        actions.append(action)
-        to_expand = predecessor
-    actions.reverse()
 
-    return actions, last_state
+def get_target_position(map: List[List[str]]) -> Tuple[int, int]:
+    for i in range(len(map)):
+        for j in range(len(map[i])):
+            if map[i][j] != HC.TARGET:
+                continue
+            return (i, j)
+
+
+def get_weapon_position(map: List[List[str]]) -> Tuple[int, int]:
+    for i in range(len(map)):
+        for j in range(len(map[i])):
+            if map[i][j] != HC.PIANO_WIRE:
+                continue
+            return (i, j)
 
 
 def phase2_run(hr, actions):
@@ -414,6 +512,12 @@ def phase2_run(hr, actions):
             pprint(status)
         elif action == "turn_anti_clockwise":
             status = hr.turn_anti_clockwise()
+            pprint(status)
+        elif action == "neutralize_civil":
+            status = hr.neutralize_civil()
+            pprint(status)
+        elif action == "neutralize_guard":
+            status = hr.neutralize_guard()
             pprint(status)
         elif action == "take_suit":
             status = hr.take_suit()

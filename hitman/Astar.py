@@ -31,6 +31,7 @@
 #         // Ajouter l'enfant à openList
 #         ajouter l'enfant à openList
 from inspect import stack
+
 # Listes vides : Grid[[]], path
 # No = noeud départ
 # Regarder si successeurs noeuds peuvent être satisifable en testant chaque possibilité d'état (garde, civil,...)
@@ -40,7 +41,7 @@ from inspect import stack
 from pprint import pprint
 from typing import Dict, Callable, List, Tuple
 from collections import deque, namedtuple, defaultdict
-from hitman.hitman import HitmanReferee, HC, complete_map_example, world_example
+from hitman import HitmanReferee, HC, world_example
 import time
 
 Variable = int
@@ -147,15 +148,17 @@ def turn_anti_clockwise(state: State) -> State:
         orientation = HC.S
     return state._replace(orientation=orientation)
 
-    def start_phase1() -> State:
-        state = State(
-            status="OK",
-            phase=1,
-            position=(0,0),
-            orientation = HC.N,
-            world = world_example_tuple,
-        )
-        return State
+
+def start_phase1() -> State:
+    state = State(
+        status="OK",
+        phase=1,
+        position=(0, 0),
+        orientation=HC.N,
+        world=world_example_tuple,
+    )
+    return State
+
 
 def update_world_content(state: State, x: int, y: int, new_content: HC) -> State:
     world = list(list(line) for line in state.world)  # convert
@@ -163,34 +166,48 @@ def update_world_content(state: State, x: int, y: int, new_content: HC) -> State
     new_state = state._replace(world=tuple(tuple(line) for line in world))  # convert
     return new_state
 
-def is_complete(grid)
 
-def search(nb_lignes:int,nb_colonnes:int) -> Map:
-    grid=[]#initialiser Grid à -1
-    for i in nb_lignes:
-        for j in nb_colonnes:
-            grid[i,j]=-1
+def is_grid_full(grid: Map) -> bool:
+    for line in grid:
+        for cell in line:
+            if cell == -1:
+                return False
+    return True
 
+
+# vérifier si case déjà remplie
+def is_in_grid(grid: Map, i, j) -> bool:
+    if grid[i][j] != -1:
+        return True
+    return False
+
+
+def update_grid_content(grid: Map, x: int, y: int, new_content: int) -> Map:
+    grid[x][y] = new_content  # update content
+    return grid
+
+
+def search(nb_lignes: int, nb_colonnes: int) -> List[Tuple[int, int]]:
+    grid = [[-1] * nb_colonnes for _ in range(nb_lignes)]  # initialiser grid à -1
     actions = {
         "move": move,
         "turn_clockwise": turn_clockwise,
         "turn_anti_clockwise": turn_anti_clockwise,
     }
     frontier = deque()  # deque is BFS, stack is DFS, heap is A*
-    visited = set()
     path = defaultdict(
         list
     )  # Utiliser defaultdict pour stocker les actions associées à chaque prédécesseur
     frontier.append(start_phase1())
     to_expand: State = frontier.pop()
-    while not (to_expand.is_target_down and to_expand.position == (0, 0)):
-        if to_expand not in visited:
+    while not is_grid_full(grid):
+        if to_expand not in grid:
             for action_name, action in actions.items():
                 new_state = action(to_expand)
                 if new_state.status == "OK":
                     path[new_state].append((action_name, to_expand))
                     frontier.append(new_state)
-                    visited.add(to_expand)
+                    # update grid
         else:
             to_expand = frontier.pop()
 
@@ -202,12 +219,14 @@ def search(nb_lignes:int,nb_colonnes:int) -> Map:
         actions.append(action)
         to_expand = predecessor
     actions.reverse()
-    return actions, last_state
+    return actions
 
 
 def main():
-    hr = HitmanReferee()
-    status = hr.start_phase1()
+    actions = search(6, 7)
+    pprint(actions)
+    # hr = HitmanReferee()
+    # status = hr.start_phase1()
     # phase1_run(hr, actions)
     # _, score, history = hr.end_phase1()
     # pprint(score)
