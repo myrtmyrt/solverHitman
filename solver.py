@@ -374,7 +374,7 @@ def search() -> Tuple[List[str], State]:
         "take_weapon": take_weapon,
         "put_on_suit": put_on_suit,
     }
-    frontier = deque()  # deque is BFS, stack is DFS, heap is A*
+    frontier = stack()  # deque is BFS, stack is DFS, heap is A*
     visited = set()
     path = defaultdict(
         list
