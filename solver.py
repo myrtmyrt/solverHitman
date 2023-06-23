@@ -1,5 +1,6 @@
+from math import fabs
 from pprint import pprint
-from typing import Dict, Callable, List
+from typing import Dict, Callable, List, Tuple
 from collections import deque, namedtuple
 from hitman.hitman import HitmanReferee, HC, world_example
 from collections import defaultdict
@@ -13,10 +14,6 @@ _State = namedtuple(
     [
         "status",
         "phase",
-        "guard_count",
-        "civil_count",
-        "m",
-        "n",
         "position",
         "orientation",
         "has_weapon",
@@ -41,6 +38,20 @@ class State(_State):
                 self.has_suit,
                 self.suit_on,
                 self.is_target_down,
+                self.world,
+            )
+        )
+
+    def __eq__(self, other):
+        return all(
+            (
+                self.position == other.position,
+                self.orientation == other.orientation,
+                self.has_weapon == other.has_weapon,
+                self.has_suit == other.has_suit,
+                self.suit_on == other.suit_on,
+                self.is_target_down == other.is_target_down,
+                self.world == other.world,
             )
         )
 
@@ -676,8 +687,4 @@ def main():
 
 
 if __name__ == "__main__":
-    start_time = time.time()
     main()
-    end_time = time.time()
-    execution_time = end_time - start_time
-    print("Temps d'exécution :", execution_time, "secondes")
