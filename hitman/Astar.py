@@ -1,11 +1,16 @@
+import os
 from heapq import heappush, heappop
 from math import fabs
 from pprint import pprint
 from typing import Dict, Callable, List, Tuple
 from collections import deque, defaultdict, namedtuple
+
+from numba.experimental import jitclass
+
 from hitman import HC, HitmanReferee, world_example
 import time
-from phase1 import *
+from numba import njit
+import numba as nb
 
 world_example_tuple = tuple(tuple(line) for line in world_example)
 
@@ -50,8 +55,8 @@ class State(_State):
         )
 
 
-def is_tuple_complete(world: Tuple[Tuple], nb_lignes, nb_colonnes) -> bool:
-    return len(world) == nb_lignes * nb_colonnes
+def is_world_complete(world: Tuple[Tuple]) -> bool:
+    return not any(0 in line for line in world)
 
 
 #
@@ -75,17 +80,17 @@ def get_offset(state: State) -> (int, int):
 
 #
 def get_world_content(map: Tuple[Tuple], x: int, y: int) -> int:
-    if x >= 3 or x < 0 or y >= 5 or y < 0:
+    if x >= len(map[0]) or x < 0 or y >= len(map) or y < 0:
         return HC.WALL
     # return map[m(map) - y - 1][x]
-    return map[x][y]
+    return map[len(map) - y - 1][x]
 
 
-def m(map: (())) -> int:
+def m(map) -> int:
     return len(map)
 
 
-def n(map: (())) -> int:
+def n(map) -> int:
     return len(map[0])
 
 
@@ -93,7 +98,7 @@ def move(state: State) -> State:
     offset_x, offset_y = get_offset(state)
     x, y = state.position
 
-    if get_world_content(state, x + offset_x, y + offset_y) not in [
+    if get_world_content(state.world, x + offset_x, y + offset_y) not in [
         HC.EMPTY,
         HC.PIANO_WIRE,
         HC.CIVIL_N,
@@ -103,17 +108,22 @@ def move(state: State) -> State:
         HC.SUIT,
         HC.TARGET,
     ]:
-        return state._replace(status="Err: invalid move")
+        # print(
+        #     f"invalid move: cannot move to {x + offset_x}, {y + offset_y} as it is {get_world_content(state.world, x + offset_x, y + offset_y)} "
+        # )
+        return state._replace(
+            status=f"Err: invalid move, cannot move on {get_world_content(state.world, x + offset_x, y + offset_y)}"
+        )
 
     # new_state = state._replace(cost=5 * seen_by_guard_num(state))
     new_state = state._replace(
         position=(x + offset_x, y + offset_y),
         cost=state.cost + 1 + 5 * seen_by_guard_num(state),
     )
-    vision = get_vision(new_state)
+    vision = get_vision(new_state, world_example_tuple)
     for pos, content in vision:
-        update_world_vision(new_state, pos[0], pos[1], content)
-    if is_tuple_complete(new_state.world):
+        new_state = update_world_vision(new_state, pos[0], pos[1], content)
+    if is_world_complete(new_state.world):
         new_state = new_state._replace(has_guessed=True)
     return new_state
 
@@ -134,8 +144,8 @@ def turn_clockwise(state: State) -> State:
     )
     vision = get_vision(new_state, world_example_tuple)
     for pos, content in vision:
-        update_world_vision(new_state, pos[0], pos[1], content)
-    if is_tuple_complete(new_state.world):
+        new_state = update_world_vision(new_state, pos[0], pos[1], content)
+    if is_world_complete(new_state.world):
         new_state = new_state._replace(has_guessed=True)
     return new_state
 
@@ -154,10 +164,10 @@ def turn_anti_clockwise(state: State) -> State:
         orientation=orientation,
         cost=state.cost + 1,
     )
-    vision = get_vision(new_state)
+    vision = get_vision(new_state, world_example_tuple)
     for pos, content in vision:
-        update_world_vision(new_state, pos[0], pos[1], content)
-    if is_tuple_complete(new_state.world):
+        new_state = update_world_vision(new_state, pos[0], pos[1], content)
+    if is_world_complete(new_state.world):
         new_state = new_state._replace(has_guessed=True)
     return new_state
 
@@ -172,7 +182,7 @@ def get_vision(
     for _ in range(0, dist):
         pos = x + offset_x, y + offset_y
         x, y = pos
-        if x >= n(state) or y >= m(state) or x < 0 or y < 0:
+        if x >= n(state.world) or y >= m(state.world) or x < 0 or y < 0:
             break
         vision.append(
             (
@@ -195,7 +205,7 @@ def start_phase1(nb_colonnes: int, nb_lignes: int) -> State:
         phase=1,
         position=(0, 0),
         orientation=HC.N,
-        world=(()),
+        world=tuple(tuple(0 for _ in range(nb_colonnes)) for _ in range(nb_lignes)),
         has_guessed=False,
         cost=0,
         guards={},
@@ -203,12 +213,13 @@ def start_phase1(nb_colonnes: int, nb_lignes: int) -> State:
     )
     state = state._replace(guards=compute_guards(state))
     state = state._replace(civils=compute_civils(state))
+    state = update_world_vision(state, 0, 0, HC.EMPTY)
     return state
 
 
 def update_world_vision(state: State, x: int, y: int, new_content: HC) -> State:
     world = list(list(line) for line in state.world)  # convert
-    world[m(state) - y - 1][x] = new_content  # update content
+    world[m(state.world) - y - 1][x] = new_content  # update content
     new_state = state._replace(world=tuple(tuple(line) for line in world))  # convert
     return new_state
 
@@ -216,7 +227,7 @@ def update_world_vision(state: State, x: int, y: int, new_content: HC) -> State:
 def seen_by_guard_num(state: State) -> int:
     count = 0
     x, y = state.position
-    if get_world_content(state, x, y) not in [
+    if get_world_content(state.world, x, y) not in [
         HC.CIVIL_N,
         HC.CIVIL_E,
         HC.CIVIL_S,
@@ -234,7 +245,7 @@ def seen_by_guard_num(state: State) -> int:
 def seen_by_civil_num(state: State) -> int:
     count = 0
     x, y = state.position
-    if get_world_content(state, x, y) not in [
+    if get_world_content(state.world, x, y) not in [
         HC.CIVIL_N,
         HC.CIVIL_E,
         HC.CIVIL_S,
@@ -265,7 +276,7 @@ def get_guard_offset(guard):
 
 
 def get_guard_vision(state: State, guard_x, guard_y, dist=2):
-    guard = get_world_content(state, guard_x, guard_y)
+    guard = get_world_content(state.world, guard_x, guard_y)
     offset_x, offset_y = get_guard_offset(guard)
     pos = (guard_x, guard_y)
     x, y = pos
@@ -275,7 +286,7 @@ def get_guard_vision(state: State, guard_x, guard_y, dist=2):
         x, y = pos
         if x >= n(state) or y >= m(state) or x < 0 or y < 0:
             break
-        vision.append((pos, get_world_content(state, x, y)))
+        vision.append((pos, get_world_content(state.world, x, y)))
         if vision[-1][1] != HC.EMPTY:
             break
     return vision
@@ -309,16 +320,16 @@ def get_civil_offset(civil):
 
 
 def get_civil_vision(state: State, civil_x, civil_y):
-    civil = get_world_content(state, civil_x, civil_y)
+    civil = get_world_content(state.world, civil_x, civil_y)
     offset_x, offset_y = get_civil_offset(civil)
     pos = (civil_x, civil_y)
     x, y = pos
-    vision = [(pos, get_world_content(state, x, y))]
+    vision = [(pos, get_world_content(state.world, x, y))]
 
     pos = x + offset_x, y + offset_y
     x, y = pos
     if n(state) > x >= 0 and m(state) > y >= 0:
-        vision.append((pos, get_world_content(state, x, y)))
+        vision.append((pos, get_world_content(state.world, x, y)))
     return vision
 
 
@@ -352,21 +363,42 @@ def successeur(state: State) -> State:
     return state
 
 
-def manhattan_distance(position1: Tuple[int, int], position2: Tuple[int, int]) -> int:
-    # Calculer la distance de Manhattan entre deux positions
-    x1, y1 = position1
-    x2, y2 = position2
-    return int(fabs(x1 - x2) + fabs(y1 - y2))
-
-
 def heuristic(state: State) -> int:
-    distance = manhattan_distance(state.position, (0, 0))
-    return distance + manhattan_distance(state.position, (0, 0))
+    return sum([1 for l in state.world for c in l if c == 0])
 
 
-def search_astar(
-    nb_lignes: int, nb_colonnes: int, map: world_example_tuple
-) -> Tuple[List[str], State]:
+chars = {
+    HC.EMPTY: " ",
+    HC.WALL: "W",
+    HC.N: "H",
+    HC.E: "H",
+    HC.S: "H",
+    HC.W: "H",
+    HC.GUARD_N: "G",
+    HC.GUARD_E: "G",
+    HC.GUARD_S: "G",
+    HC.GUARD_W: "G",
+    HC.CIVIL_N: "C",
+    HC.CIVIL_E: "C",
+    HC.CIVIL_S: "C",
+    HC.CIVIL_W: "C",
+    HC.SUIT: "S",
+    HC.PIANO_WIRE: "P",
+    HC.TARGET: "T",
+    0: "?",
+}
+
+
+def print_map(state: State) -> None:
+    print("-" * (n(state.world) + 2))
+    for l in state.world:
+        print("|" + "".join([chars[c] for c in l]) + "|")
+    print("-" * (n(state.world) + 2))
+    print("orientation: ", state.orientation)
+    print("last action: ", state.status)
+
+
+def search_astar(nb_lignes: int, nb_colonnes: int) -> Tuple[List[str], State]:
     actions = {
         "move": move,
         "turn_clockwise": turn_clockwise,
@@ -397,16 +429,19 @@ def search_astar(
                             new_state,
                         ),
                     )
-                    visited.add(to_expand)
+                # os.system("clear")
+                # print_map(new_state)
+                visited.add(to_expand)
         elif frontier:
             _, _, to_expand = heappop(frontier)
         else:
+            print("No solution found")
             break
 
     last_state = to_expand
 
     actions_done = []
-    while to_expand != start_phase1():
+    while to_expand != start_state:
         action, predecessor = path[to_expand][0]
         actions_done.append(action)
         to_expand = predecessor
@@ -415,8 +450,13 @@ def search_astar(
 
 
 def main():
-    actions = search_astar(3, 5, world_example_tuple)
+    actions, last_state = search_astar(
+        len(world_example_tuple), len(world_example_tuple[0])
+    )
     pprint(actions)
+    pprint(last_state)
+    print_map(last_state)
+    pprint(get_vision(last_state, world_example_tuple))
     # hr = HitmanReferee()
     # status = hr.start_phase1()
     # phase1_run(hr, actions)
