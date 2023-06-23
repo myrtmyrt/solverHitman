@@ -186,19 +186,20 @@ def update_grid_content(grid: Map, x: int, y: int, new_content: int) -> Map:
     grid[x][y] = new_content  # update content
     return grid
 
-#renvoie le successeur direct selon le state et son orientation
-def successeur(state : State) -> State:
-    if (state.orientation==HC.E ):
-        state.position = (state.position[0], state.position[1] + 1)
-    elif (state.orientation==HC.N):
-        state.position = (state.position[0]+1, state.position[1])
-    elif (state.orientation==HC.S):
-        state.position = (state.position[0] - 1, state.position[1])
-    elif (state.orientation==HC.W):
-        state.position = (state.position[0], state.position[1]-1)
 
-    if (state[0]>= n(state) or state[0]<= 1 or state[1]>= m(state) or state[1]<= 0) :
-        succ_state = ()  #si succ_state dépasse index grille, renvoie tuple vide
+# renvoie le successeur direct selon le state et son orientation
+def successeur(state: State) -> State:
+    if state.orientation == HC.E:
+        state.position = (state.position[0], state.position[1] + 1)
+    elif state.orientation == HC.N:
+        state.position = (state.position[0] + 1, state.position[1])
+    elif state.orientation == HC.S:
+        state.position = (state.position[0] - 1, state.position[1])
+    elif state.orientation == HC.W:
+        state.position = (state.position[0], state.position[1] - 1)
+
+    if state[0] >= n(state) or state[0] <= 1 or state[1] >= m(state) or state[1] <= 0:
+        succ_state = ()  # si succ_state dépasse index grille, renvoie tuple vide
     return state
 
 

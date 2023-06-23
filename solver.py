@@ -6,6 +6,8 @@ from collections import defaultdict
 import time
 from heapq import heappop, heappush
 
+world_example_tuple = tuple(tuple(line) for line in world_example)
+
 _State = namedtuple(
     "State",
     [
@@ -23,6 +25,8 @@ _State = namedtuple(
         "is_target_down",
         "world",
         "cost",
+        "guards",
+        "civils",
     ],
 )
 
@@ -59,15 +63,6 @@ def get_offset(state: State) -> (int, int):
     return offset
 
 
-world_example_tuple = tuple(tuple(line) for line in world_example)
-
-
-# def get_world_content(state: State, x: int, y: int):
-#     if x > m(state) or x < 0 or y > n(state) or y < 0:
-#         return HC.WALL
-#     return state.world[len(state.world) - y - 1][x]
-
-
 def get_world_content(state: State, x: int, y: int):
     if x >= n(state) or x < 0 or y >= m(state) or y < 0:
         return HC.WALL
@@ -85,7 +80,7 @@ def n(state: State) -> int:
 def move(state: State) -> State:
     offset_x, offset_y = get_offset(state)
     x, y = state.position
-    # print("moving to x: ", x + offset_x, " y: ", y + offset_y)
+
     if get_world_content(state, x + offset_x, y + offset_y) not in [
         HC.EMPTY,
         HC.PIANO_WIRE,
@@ -97,8 +92,13 @@ def move(state: State) -> State:
         HC.TARGET,
     ]:
         return state._replace(status="Err: invalid move")
-
-    return state._replace(position=(x + offset_x, y + offset_y))
+    new_state = state._replace(
+        cost=state.cost + 0 if state.suit_on else 5 * seen_by_guard_num(state)
+    )
+    return new_state._replace(
+        position=(x + offset_x, y + offset_y),
+        cost=state.cost + 1 + 5 * seen_by_guard_num(state) * (1 - state.suit_on),
+    )
 
 
 def turn_clockwise(state: State) -> State:
@@ -111,7 +111,10 @@ def turn_clockwise(state: State) -> State:
     else:
         orientation = HC.N
 
-    return state._replace(orientation=orientation)
+    return state._replace(
+        orientation=orientation,
+        cost=state.cost + 1,
+    )
 
 
 def turn_anti_clockwise(state: State) -> State:
@@ -123,7 +126,11 @@ def turn_anti_clockwise(state: State) -> State:
         orientation = HC.E
     else:
         orientation = HC.S
-    return state._replace(orientation=orientation)
+
+    return state._replace(
+        orientation=orientation,
+        cost=state.cost + 1,
+    )
 
 
 def start_phase2() -> State:
@@ -138,7 +145,11 @@ def start_phase2() -> State:
         is_target_down=False,
         world=world_example_tuple,
         cost=0,
+        guards={},
+        civils={},
     )
+    state = state._replace(guards=compute_guards(state))
+    state = state._replace(civils=compute_civils(state))
     return state
 
 
@@ -149,6 +160,44 @@ def update_world_content(state: State, x: int, y: int, new_content: HC) -> State
     return new_state
 
 
+def seen_by_guard_num(state: State) -> int:
+    count = 0
+    x, y = state.position
+    if get_world_content(state, x, y) not in [
+        HC.CIVIL_N,
+        HC.CIVIL_E,
+        HC.CIVIL_S,
+        HC.CIVIL_W,
+    ]:
+        for guard, vision in state.guards.items():
+            # Note : un garde ne peut pas voir au dela d'un objet,
+            # mais si Hitman est sur l'objet alors il voit Hitman
+            count += (
+                1 if len([0 for ((l, c), _) in vision if l == x and c == y]) > 0 else 0
+            )
+    return count
+
+
+def seen_by_civil_num(state: State) -> int:
+    count = 0
+    x, y = state.position
+    if get_world_content(state, x, y) not in [
+        HC.CIVIL_N,
+        HC.CIVIL_E,
+        HC.CIVIL_S,
+        HC.CIVIL_W,
+    ]:
+        for civil, vision in state.civils.items():
+            # Note : un garde ne peut pas voir au dela d'un objet,
+            # mais si Hitman est sur l'objet alors il voit Hitman
+            count += (
+                1 if len([0 for ((l, c), _) in vision if l == x and c == y]) > 0 else 0
+            )
+    else:
+        count = 1
+    return count
+
+
 def kill_target(state: State) -> State:
     if state.phase != 2:
         raise ValueError("Err: invalid phase")
@@ -157,8 +206,10 @@ def kill_target(state: State) -> State:
     if get_world_content(state, x, y) != HC.TARGET or not state.has_weapon:
         return state._replace(status="Err: invalid move")
 
-    new_state = state._replace(is_target_down=True)
-    update_world_content(new_state, x, y, HC.EMPTY)
+    new_state = state._replace(
+        is_target_down=True, cost=state.cost + 1 + 100 * seen_by_guard_num(state)
+    )
+    new_state = update_world_content(new_state, x, y, HC.EMPTY)
 
     return new_state
 
@@ -264,8 +315,13 @@ def neutralize_guard(state: State) -> State:
         pos for (pos, _) in compute_guards(state)[(x + offset_x, y + offset_y)]
     ]:
         return state._replace(status="Err: invalid move")
-    new_state = state._replace()
-    update_world_content(new_state, x + offset_x, y + offset_y, HC.EMPTY)
+    new_state = state._replace(
+        cost=state.cost
+        + 20
+        + 100 * (seen_by_guard_num(state) + seen_by_civil_num(state))
+    )
+    new_state = update_world_content(new_state, x + offset_x, y + offset_y, HC.EMPTY)
+    new_state = new_state._replace(guards=compute_guards(new_state))
 
     return new_state
 
@@ -286,33 +342,16 @@ def neutralize_civil(state: State) -> State:
     ]:
         return state._replace(status="Err: invalid move")
 
-    new_state = state._replace()
-    update_world_content(new_state, x + offset_x, y + offset_y, HC.EMPTY)
+    new_state = state._replace(
+        cost=state.cost
+        + 1
+        + 20
+        + 100 * (seen_by_guard_num(state) + seen_by_civil_num(state))
+    )
+    new_state = update_world_content(new_state, x + offset_x, y + offset_y, HC.EMPTY)
+    new_state = new_state._replace(civils=compute_civils(new_state))
 
     return new_state
-
-
-# def neutralize_civil(state: State) -> State:
-#     if state.phase != 2:
-#         raise ValueError("Err: invalid phase")
-#
-#     offset_x, offset_y = get_offset(state)
-#     x, y = state.position
-#     target_x = x + offset_x
-#     target_y = y + offset_y
-#
-#     target_content = get_world_content(state, target_x, target_y)
-#
-#     if (
-#         target_content != HC.CIVIL_N
-#         and target_content != HC.CIVIL_S
-#         and target_content != HC.CIVIL_E
-#         and target_content != HC.CIVIL_W
-#     ):
-#         return state._replace(status="Err: invalid target")
-#
-#     new_state = update_world_content(state, target_x, target_y, HC.EMPTY)
-#     return new_state
 
 
 def take_suit(state: State) -> State:
@@ -323,8 +362,8 @@ def take_suit(state: State) -> State:
     if get_world_content(state, x, y) != HC.SUIT:
         return state._replace(status="Err: invalid move")
 
-    new_state = state._replace(has_suit=True)
-    update_world_content(new_state, x, y, HC.EMPTY)
+    new_state = state._replace(has_suit=True, cost=state.cost + 1)
+    new_state = update_world_content(new_state, x, y, HC.EMPTY)
 
     return new_state
 
@@ -337,8 +376,8 @@ def take_weapon(state: State) -> State:
     if get_world_content(state, x, y) != HC.PIANO_WIRE:
         return state._replace(status="Err: invalid move")
 
-    new_state = state._replace(has_weapon=True)
-    update_world_content(new_state, x, y, HC.EMPTY)
+    new_state = state._replace(has_weapon=True, cost=state.cost + 1)
+    new_state = update_world_content(new_state, x, y, HC.EMPTY)
 
     return new_state
 
@@ -350,7 +389,7 @@ def put_on_suit(state: State) -> State:
     if not state.has_suit:
         return state._replace(status="Err: invalid move")
 
-    new_state = state._replace(suit_on=True)
+    new_state = state._replace(suit_on=True, cost=state.cost + 1)
 
     return new_state
 
@@ -414,8 +453,10 @@ def search_bfs() -> Tuple[List[str], State]:
                     path[new_state].append((action_name, to_expand))
                     frontier.append(new_state)
                     visited.add(to_expand)
-        else:
+        elif frontier:
             to_expand = frontier.pop()
+        else:
+            break
 
     last_state = to_expand
 
@@ -430,13 +471,14 @@ def search_bfs() -> Tuple[List[str], State]:
 
 
 def search_dfs() -> Tuple[List[str], State]:
-    frontier = stack()  # deque is BFS, stack is DFS, heap is A*
+    frontier = []  # deque is BFS, list is DFS, heap is A*
     visited = set()
     path = defaultdict(
         list
     )  # Utiliser defaultdict pour stocker les actions associées à chaque prédécesseur
     frontier.append(start_phase2())
     to_expand: State = frontier.pop()
+    # print number of objects in stack
     while not (to_expand.is_target_down and to_expand.position == (0, 0)):
         if to_expand not in visited:
             for action_name, action in actions.items():
@@ -445,8 +487,10 @@ def search_dfs() -> Tuple[List[str], State]:
                     path[new_state].append((action_name, to_expand))
                     frontier.append(new_state)
                     visited.add(to_expand)
-        else:
+        elif frontier:
             to_expand = frontier.pop()
+        else:
+            break
 
     last_state = to_expand
 
@@ -502,10 +546,19 @@ def search_glouton() -> Tuple[List[str], State]:
                 new_state = action(to_expand)
                 if new_state.status == "OK":
                     path[new_state].append((action_name, to_expand))
-                    heappush(frontier, (heuristic(new_state), id(new_state), new_state))
+                    heappush(
+                        frontier,
+                        (
+                            heuristic(new_state),
+                            id(new_state),
+                            new_state,
+                        ),
+                    )
                     visited.add(to_expand)
-        else:
+        elif frontier:
             _, _, to_expand = heappop(frontier)
+        else:
+            break
 
     last_state = to_expand
 
@@ -536,11 +589,19 @@ def search_astar() -> Tuple[List[str], State]:
                 new_state = action(to_expand)
                 if new_state.status == "OK":
                     path[new_state].append((action_name, to_expand))
-
-                    heappush(frontier, (heuristic(new_state), id(new_state), new_state))
+                    heappush(
+                        frontier,
+                        (
+                            heuristic(new_state) + new_state.cost,
+                            id(new_state),
+                            new_state,
+                        ),
+                    )
                     visited.add(to_expand)
-        else:
+        elif frontier:
             _, _, to_expand = heappop(frontier)
+        else:
+            break
 
     last_state = to_expand
 
@@ -570,32 +631,22 @@ def get_weapon_position(map: List[List[str]]) -> Tuple[int, int]:
             return (i, j)
 
 
-def phase2_run(hr, actions):
-    for action in actions:
-        if action == "move":
-            status = hr.move()
-            # pprint(status)
-        elif action == "turn_clockwise":
-            status = hr.turn_clockwise()
-            # pprint(status)
-        elif action == "turn_anti_clockwise":
-            status = hr.turn_anti_clockwise()
-            # pprint(status)
-        elif action == "neutralize_civil":
-            status = hr.neutralize_civil()
-            # pprint(status)
-        elif action == "neutralize_guard":
-            status = hr.neutralize_guard()
-            # pprint(status)
-        elif action == "take_suit":
-            status = hr.take_suit()
-            # pprint(status)
-        elif action == "take_weapon":
-            status = hr.take_weapon()
-            # pprint(status)
-        elif action == "kill_target":
-            status = hr.kill_target()
-            # pprint(status)
+def phase2_run(hr, actions_to_do):
+    hr_actions = {
+        "move": hr.move,
+        "turn_clockwise": hr.turn_clockwise,
+        "turn_anti_clockwise": hr.turn_anti_clockwise,
+        "neutralize_civil": hr.neutralize_civil,
+        "neutralize_guard": hr.neutralize_guard,
+        "take_suit": hr.take_suit,
+        "put_on_suit": hr.put_on_suit,
+        "take_weapon": hr.take_weapon,
+        "kill_target": hr.kill_target,
+    }
+
+    for action in actions_to_do:
+        hr_actions[action]()
+        print(action)
 
 
 def main():
@@ -604,6 +655,7 @@ def main():
     t1 = time.time()
     actions_bfs, last_state_bfs = search_bfs()
     t2 = time.time()
+    print(f"DFS: {len(actions_dfs)} actions in {round((t1 - t0) * 1000)}ms")
     actions_glouton, last_state_glouton = search_glouton()
     t3 = time.time()
     actions_astar, last_state_astar = search_astar()
@@ -612,12 +664,13 @@ def main():
     hr.start_phase2()
     phase2_run(hr, actions_astar)
     _, score, _ = hr.end_phase2()
+    # pprint(actions_test)
 
-    # print(last_state)
-    print(f"DFS: {len(actions_dfs)} actions in {round((t1-t0)*1000)}ms")
     print(f"BFS: {len(actions_bfs)} actions in {round((t2-t1)*1000)}ms")
     print(f"Glouton: {len(actions_glouton)} actions in {round((t3-t2)*1000)}ms")
-    print(f"A*: {len(actions_astar)} actions in {round((t4-t3)*1000)}ms")
+    print(
+        f"A*: {len(actions_astar)} actions in {round((t4-t3)*1000)}ms with a cost of {last_state_astar.cost}"
+    )
 
     pprint(score)
 

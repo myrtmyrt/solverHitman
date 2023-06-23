@@ -88,15 +88,17 @@ class HC(Enum):
 #     [HC.EMPTY, HC.EMPTY, HC.WALL, HC.WALL, HC.EMPTY, HC.PIANO_WIRE, HC.EMPTY],
 # ]
 
+
 world_example = [
-    [HC.GUARD_S, HC.GUARD_S, HC.GUARD_S, HC.SUIT, HC.EMPTY, HC.EMPTY, HC.WALL],
-    [HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.GUARD_W, HC.EMPTY],
-    [HC.TARGET, HC.WALL, HC.EMPTY, HC.EMPTY, HC.GUARD_W, HC.CIVIL_N, HC.EMPTY],
-    [HC.WALL, HC.WALL, HC.EMPTY, HC.GUARD_E, HC.EMPTY, HC.CIVIL_E, HC.CIVIL_W],
-    [HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY],
-    [HC.EMPTY, HC.EMPTY, HC.WALL, HC.WALL, HC.EMPTY, HC.PIANO_WIRE, HC.EMPTY],
+    [HC.GUARD_S, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.EMPTY],
+    [HC.EMPTY, HC.EMPTY, HC.WALL, HC.WALL, HC.EMPTY, HC.WALL, HC.EMPTY],
+    [HC.EMPTY, HC.EMPTY, HC.WALL, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.GUARD_W],
+    [HC.EMPTY, HC.WALL, HC.PIANO_WIRE, HC.EMPTY, HC.EMPTY, HC.EMPTY, HC.GUARD_S],
+    [HC.EMPTY, HC.WALL, HC.GUARD_E, HC.EMPTY, HC.EMPTY, HC.WALL, HC.EMPTY],
+    [HC.EMPTY, HC.WALL, HC.TARGET, HC.EMPTY, HC.EMPTY, HC.SUIT, HC.CIVIL_W],
 ]
 
+""" 
 complete_map_example = {
     (0, 5): HC.EMPTY,
     (1, 5): HC.EMPTY,
@@ -141,6 +143,7 @@ complete_map_example = {
     (5, 0): HC.PIANO_WIRE,
     (6, 0): HC.EMPTY,
 }
+"""
 
 
 class HitmanReferee:
@@ -224,7 +227,7 @@ class HitmanReferee:
         map_content = {(x, y): self.__get_world_content(x, y) for (x, y) in all_tiles}
         return (
             True,
-            f"Your score is {self.__phase1_guess_score-self.__phase1_penalties}",
+            f"Your score is {self.__phase1_guess_score - self.__phase1_penalties}",
             self.__phase1_history,
             map_content,
         )

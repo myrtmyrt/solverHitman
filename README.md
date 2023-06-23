@@ -21,7 +21,7 @@ Il s’agit d’un jeu séquentiel à un joueur. Les objets pouvant se situer su
 
 ### Les différentes actions possibles
 Seul Hitman peut se déplace et effectuer différentes actions : 
- *Avancer d'une case 
+* Avancer d'une case 
 * Se tourner dans le sens des aiguilles d'une montre
 * Se tourner dans le sens contraire des aiguilles d'une montre
 * Prendre le costume
