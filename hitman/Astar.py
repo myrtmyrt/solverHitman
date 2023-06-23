@@ -1,48 +1,13 @@
-# // A* (star) Pathfinding
-# // Initialiser les listes ouvertes et fermées
-# laisser openList être une liste vide de nœuds
-# laisser closedList être une liste vide de nœuds
-# // Ajouter le nœud de départ
-# ajouter le nœud de départ à openList (laisser f à zéro)
-# // Boucler jusqu'à ce que vous trouviez la fin
-# tant que openList n'est pas vide
-#     // Obtenir le nœud actuel
-#     laisser currentNode être le nœud ayant la valeur f la plus faible
-#     supprimer currentNode de openList
-#     ajouter currentNode à closedList
-#     // Trouvé la destination
-#     si currentNode est la destination
-#         Félicitations ! Vous avez trouvé la fin ! Revenez en arrière pour obtenir le chemin
-#     // Générer les enfants
-#     laisser les enfants du currentNode être les nœuds adjacents
-#
-#     pour chaque enfant parmi les enfants
-#         // L'enfant est dans closedList
-#         si l'enfant est dans closedList
-#             continuer au début de la boucle for
-#         // Créer les valeurs f, g et h
-#         enfant.g = currentNode.g + distance entre l'enfant et le nœud actuel
-#         enfant.h = distance entre l'enfant et la fin
-#         enfant.f = enfant.g + enfant.h
-#         // L'enfant est déjà dans openList
-#         si la position de l'enfant est dans les positions des nœuds de openList
-#             si enfant.g est supérieur à g du nœud de openList
-#                 continuer au début de la boucle for
-#         // Ajouter l'enfant à openList
-#         ajouter l'enfant à openList
-from inspect import stack
-
-# Listes vides : Grid[[]], path
-# No = noeud départ
-# Regarder si successeurs noeuds peuvent être satisifable en testant chaque possibilité d'état (garde, civil,...)
-# on prend celui qui a le numero le plus petit (=empty) et on l'ajoute au path
-# on regarde
-
+from heapq import heappush, heappop
+from math import fabs
 from pprint import pprint
 from typing import Dict, Callable, List, Tuple
-from collections import deque, namedtuple, defaultdict
-from hitman import HitmanReferee, HC, world_example
+from collections import deque, defaultdict, namedtuple
+from hitman import HC, HitmanReferee, world_example
 import time
+from phase1 import *
+
+world_example_tuple = tuple(tuple(line) for line in world_example)
 
 Variable = int
 Literal = int
@@ -50,9 +15,11 @@ Clause = List[Literal]
 Model = List[Literal]
 Clause_Base = List[Clause]
 Map = List[List[int]]
+from typing import List, Tuple, Dict
 
+world_example_tuple = tuple(tuple(line) for line in world_example)
 
-State = namedtuple(
+_State = namedtuple(
     "State",
     [
         "status",
@@ -60,10 +27,34 @@ State = namedtuple(
         "position",
         "orientation",
         "world",
+        "cost",
+        "guards",
+        "civils",
+        "has_guessed",
     ],
 )
 
 
+class State(_State):
+    def __hash__(self):
+        return hash((self.position, self.orientation, self.world, self.has_guessed))
+
+    def __eq__(self, other):
+        return all(
+            (
+                self.position == other.position,
+                self.orientation == other.orientation,
+                self.world == other.world,
+                self.has_guessed == other.has_guessed,
+            )
+        )
+
+
+def is_tuple_complete(world: Tuple[Tuple], nb_lignes, nb_colonnes) -> bool:
+    return len(world) == nb_lignes * nb_colonnes
+
+
+#
 def get_offset(state: State) -> (int, int):
     """
     returns the offset corresponding to the player's orientation
@@ -82,33 +73,26 @@ def get_offset(state: State) -> (int, int):
     return offset
 
 
-world_example_tuple = tuple(tuple(line) for line in world_example)
-
-
-# def get_world_content(state: State, x: int, y: int):
-#     if x > m(state) or x < 0 or y > n(state) or y < 0:
-#         return HC.WALL
-#     return state.world[len(state.world) - y - 1][x]
-
-
-def get_world_content(state: State, x: int, y: int):
-    if x >= n(state) or x < 0 or y >= m(state) or y < 0:
+#
+def get_world_content(map: Tuple[Tuple], x: int, y: int) -> int:
+    if x >= 3 or x < 0 or y >= 5 or y < 0:
         return HC.WALL
-    return state.world[m(state) - y - 1][x]
+    # return map[m(map) - y - 1][x]
+    return map[x][y]
 
 
-def m(state: State) -> int:
-    return len(state.world)
+def m(map: (())) -> int:
+    return len(map)
 
 
-def n(state: State) -> int:
-    return len(state.world[0])
+def n(map: (())) -> int:
+    return len(map[0])
 
 
 def move(state: State) -> State:
     offset_x, offset_y = get_offset(state)
     x, y = state.position
-    # print("moving to x: ", x + offset_x, " y: ", y + offset_y)
+
     if get_world_content(state, x + offset_x, y + offset_y) not in [
         HC.EMPTY,
         HC.PIANO_WIRE,
@@ -121,7 +105,17 @@ def move(state: State) -> State:
     ]:
         return state._replace(status="Err: invalid move")
 
-    return state._replace(position=(x + offset_x, y + offset_y))
+    # new_state = state._replace(cost=5 * seen_by_guard_num(state))
+    new_state = state._replace(
+        position=(x + offset_x, y + offset_y),
+        cost=state.cost + 1 + 5 * seen_by_guard_num(state),
+    )
+    vision = get_vision(new_state)
+    for pos, content in vision:
+        update_world_vision(new_state, pos[0], pos[1], content)
+    if is_tuple_complete(new_state.world):
+        new_state = new_state._replace(has_guessed=True)
+    return new_state
 
 
 def turn_clockwise(state: State) -> State:
@@ -134,7 +128,16 @@ def turn_clockwise(state: State) -> State:
     else:
         orientation = HC.N
 
-    return state._replace(orientation=orientation)
+    new_state = state._replace(
+        orientation=orientation,
+        cost=state.cost + 1,
+    )
+    vision = get_vision(new_state, world_example_tuple)
+    for pos, content in vision:
+        update_world_vision(new_state, pos[0], pos[1], content)
+    if is_tuple_complete(new_state.world):
+        new_state = new_state._replace(has_guessed=True)
+    return new_state
 
 
 def turn_anti_clockwise(state: State) -> State:
@@ -146,45 +149,191 @@ def turn_anti_clockwise(state: State) -> State:
         orientation = HC.E
     else:
         orientation = HC.S
-    return state._replace(orientation=orientation)
+
+    new_state = state._replace(
+        orientation=orientation,
+        cost=state.cost + 1,
+    )
+    vision = get_vision(new_state)
+    for pos, content in vision:
+        update_world_vision(new_state, pos[0], pos[1], content)
+    if is_tuple_complete(new_state.world):
+        new_state = new_state._replace(has_guessed=True)
+    return new_state
 
 
-def start_phase1() -> State:
+def get_vision(
+    state: State, map: Tuple[Tuple], dist: int = 3
+) -> List[Tuple[Tuple[int, int], HC]]:
+    offset_x, offset_y = get_offset(state)
+    pos = state.position
+    x, y = pos
+    vision = []
+    for _ in range(0, dist):
+        pos = x + offset_x, y + offset_y
+        x, y = pos
+        if x >= n(state) or y >= m(state) or x < 0 or y < 0:
+            break
+        vision.append(
+            (
+                pos,
+                get_world_content(
+                    map,
+                    x,
+                    y,
+                ),
+            )
+        )
+        if vision[-1][1] != HC.EMPTY:
+            break
+    return vision
+
+
+def start_phase1(nb_colonnes: int, nb_lignes: int) -> State:
     state = State(
         status="OK",
         phase=1,
         position=(0, 0),
         orientation=HC.N,
-        world=world_example_tuple,
+        world=(()),
+        has_guessed=False,
+        cost=0,
+        guards={},
+        civils={},
     )
-    return State
+    state = state._replace(guards=compute_guards(state))
+    state = state._replace(civils=compute_civils(state))
+    return state
 
 
-def update_world_content(state: State, x: int, y: int, new_content: HC) -> State:
+def update_world_vision(state: State, x: int, y: int, new_content: HC) -> State:
     world = list(list(line) for line in state.world)  # convert
     world[m(state) - y - 1][x] = new_content  # update content
     new_state = state._replace(world=tuple(tuple(line) for line in world))  # convert
     return new_state
 
 
-def is_grid_full(grid: Map) -> bool:
-    for line in grid:
-        for cell in line:
-            if cell == -1:
-                return False
-    return True
+def seen_by_guard_num(state: State) -> int:
+    count = 0
+    x, y = state.position
+    if get_world_content(state, x, y) not in [
+        HC.CIVIL_N,
+        HC.CIVIL_E,
+        HC.CIVIL_S,
+        HC.CIVIL_W,
+    ]:
+        for guard, vision in state.guards.items():
+            # Note : un garde ne peut pas voir au dela d'un objet,
+            # mais si Hitman est sur l'objet alors il voit Hitman
+            count += (
+                1 if len([0 for ((l, c), _) in vision if l == x and c == y]) > 0 else 0
+            )
+    return count
 
 
-# vérifier si case déjà remplie
-def is_in_grid(grid: Map, i, j) -> bool:
-    if grid[i][j] != -1:
-        return True
-    return False
+def seen_by_civil_num(state: State) -> int:
+    count = 0
+    x, y = state.position
+    if get_world_content(state, x, y) not in [
+        HC.CIVIL_N,
+        HC.CIVIL_E,
+        HC.CIVIL_S,
+        HC.CIVIL_W,
+    ]:
+        for civil, vision in state.civils.items():
+            # Note : un garde ne peut pas voir au dela d'un objet,
+            # mais si Hitman est sur l'objet alors il voit Hitman
+            count += (
+                1 if len([0 for ((l, c), _) in vision if l == x and c == y]) > 0 else 0
+            )
+    else:
+        count = 1
+    return count
 
 
-def update_grid_content(grid: Map, x: int, y: int, new_content: int) -> Map:
-    grid[x][y] = new_content  # update content
-    return grid
+def get_guard_offset(guard):
+    if guard == HC.GUARD_N:
+        offset = 0, 1
+    elif guard == HC.GUARD_E:
+        offset = 1, 0
+    elif guard == HC.GUARD_S:
+        offset = 0, -1
+    elif guard == HC.GUARD_W:
+        offset = -1, 0
+
+    return offset
+
+
+def get_guard_vision(state: State, guard_x, guard_y, dist=2):
+    guard = get_world_content(state, guard_x, guard_y)
+    offset_x, offset_y = get_guard_offset(guard)
+    pos = (guard_x, guard_y)
+    x, y = pos
+    vision = []
+    for _ in range(0, dist):
+        pos = x + offset_x, y + offset_y
+        x, y = pos
+        if x >= n(state) or y >= m(state) or x < 0 or y < 0:
+            break
+        vision.append((pos, get_world_content(state, x, y)))
+        if vision[-1][1] != HC.EMPTY:
+            break
+    return vision
+
+
+def compute_guards(
+    state: State,
+) -> Dict[Tuple[int, int], List[Tuple[Tuple[int, int], HC]]]:
+    locations = {}
+    for l_index, l in enumerate(state.world):
+        for c_index, c in enumerate(l):
+            if c == HC.GUARD_N or c == HC.GUARD_E or c == HC.GUARD_S or c == HC.GUARD_W:
+                guard_x, guard_y = (c_index, m(state) - l_index - 1)
+                locations[(guard_x, guard_y)] = get_guard_vision(
+                    state, guard_x, guard_y
+                )
+    return locations
+
+
+def get_civil_offset(civil):
+    if civil == HC.CIVIL_N:
+        offset = 0, 1
+    elif civil == HC.CIVIL_E:
+        offset = 1, 0
+    elif civil == HC.CIVIL_S:
+        offset = 0, -1
+    elif civil == HC.CIVIL_W:
+        offset = -1, 0
+
+    return offset
+
+
+def get_civil_vision(state: State, civil_x, civil_y):
+    civil = get_world_content(state, civil_x, civil_y)
+    offset_x, offset_y = get_civil_offset(civil)
+    pos = (civil_x, civil_y)
+    x, y = pos
+    vision = [(pos, get_world_content(state, x, y))]
+
+    pos = x + offset_x, y + offset_y
+    x, y = pos
+    if n(state) > x >= 0 and m(state) > y >= 0:
+        vision.append((pos, get_world_content(state, x, y)))
+    return vision
+
+
+def compute_civils(
+    state: State,
+) -> Dict[Tuple[int, int], List[Tuple[Tuple[int, int], HC]]]:
+    locations = {}
+    for l_index, l in enumerate(state.world):
+        for c_index, c in enumerate(l):
+            if c == HC.CIVIL_N or c == HC.CIVIL_E or c == HC.CIVIL_S or c == HC.CIVIL_W:
+                civil_x, civil_y = (c_index, m(state) - l_index - 1)
+                locations[(civil_x, civil_y)] = get_civil_vision(
+                    state, civil_x, civil_y
+                )
+    return locations
 
 
 # renvoie le successeur direct selon le state et son orientation
@@ -203,43 +352,70 @@ def successeur(state: State) -> State:
     return state
 
 
-def search(nb_lignes: int, nb_colonnes: int) -> List[Tuple[int, int]]:
-    grid = [[-1] * nb_colonnes for _ in range(nb_lignes)]  # initialiser grid à -1
+def manhattan_distance(position1: Tuple[int, int], position2: Tuple[int, int]) -> int:
+    # Calculer la distance de Manhattan entre deux positions
+    x1, y1 = position1
+    x2, y2 = position2
+    return int(fabs(x1 - x2) + fabs(y1 - y2))
+
+
+def heuristic(state: State) -> int:
+    distance = manhattan_distance(state.position, (0, 0))
+    return distance + manhattan_distance(state.position, (0, 0))
+
+
+def search_astar(
+    nb_lignes: int, nb_colonnes: int, map: world_example_tuple
+) -> Tuple[List[str], State]:
     actions = {
         "move": move,
         "turn_clockwise": turn_clockwise,
         "turn_anti_clockwise": turn_anti_clockwise,
     }
-    frontier = deque()  # deque is BFS, stack is DFS, heap is A*
+
+    frontier = []  # deque is BFS, stack is DFS, heap is A*
+    visited = set()
     path = defaultdict(
         list
     )  # Utiliser defaultdict pour stocker les actions associées à chaque prédécesseur
-    frontier.append(start_phase1())
-    to_expand: State = frontier.pop()
-    while not is_grid_full(grid):
-        if to_expand not in grid:
+    start_state = start_phase1(nb_colonnes, nb_lignes)
+    heappush(
+        frontier, (0, id(start_state), start_state)
+    )  # heuristic value, id(state), state
+    _, _, to_expand = heappop(frontier)
+    while not to_expand.has_guessed:
+        if to_expand not in visited:
             for action_name, action in actions.items():
                 new_state = action(to_expand)
                 if new_state.status == "OK":
                     path[new_state].append((action_name, to_expand))
-                    frontier.append(new_state)
-                    # update grid
+                    heappush(
+                        frontier,
+                        (
+                            heuristic(new_state) + new_state.cost,
+                            id(new_state),
+                            new_state,
+                        ),
+                    )
+                    visited.add(to_expand)
+        elif frontier:
+            _, _, to_expand = heappop(frontier)
         else:
-            to_expand = frontier.pop()
+            break
 
     last_state = to_expand
 
-    actions = []
+    actions_done = []
     while to_expand != start_phase1():
         action, predecessor = path[to_expand][0]
-        actions.append(action)
+        actions_done.append(action)
         to_expand = predecessor
-    actions.reverse()
-    return actions
+    actions_done.reverse()
+    return actions_done, last_state
 
 
 def main():
-    actions = search(6, 7)
+    actions = search_astar(3, 5, world_example_tuple)
     pprint(actions)
     # hr = HitmanReferee()
     # status = hr.start_phase1()
