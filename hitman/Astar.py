@@ -389,6 +389,7 @@ chars = {
 }
 
 
+
 def print_map(state: State) -> None:
     print("-" * (n(state.world) + 2))
     for l in state.world:
@@ -449,6 +450,18 @@ def search_astar(nb_lignes: int, nb_colonnes: int) -> Tuple[List[str], State]:
     return actions_done, last_state
 
 
+def phase1_run(hr, actions_to_do):
+    hr_actions = {
+        "move": hr.move,
+        "turn_clockwise": hr.turn_clockwise,
+        "turn_anti_clockwise": hr.turn_anti_clockwise,
+    }
+
+    for action in actions_to_do:
+        hr_actions[action]()
+        # print(action)
+
+
 def main():
     actions, last_state = search_astar(
         len(world_example_tuple), len(world_example_tuple[0])
@@ -457,10 +470,19 @@ def main():
     pprint(last_state)
     print_map(last_state)
     pprint(get_vision(last_state, world_example_tuple))
-    # hr = HitmanReferee()
-    # status = hr.start_phase1()
-    # phase1_run(hr, actions)
-    # _, score, history = hr.end_phase1()
+    hr = HitmanReferee()
+    hr.start_phase1()
+    phase1_run(hr, actions)
+    complete_map_example = {}
+
+    for y, row in enumerate(world_example):
+        for x, value in enumerate(row):
+            complete_map_example[(x, y)] = value
+
+    score_test = _, score, history, true_map = hr.end_phase1()
+    pprint(score_test)
+
+    # _, score, _, _ = hr.end_phase1()
     # pprint(score)
 
 
