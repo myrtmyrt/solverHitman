@@ -115,11 +115,11 @@ def move(state: State) -> State:
             status=f"Err: invalid move, cannot move on {get_world_content(state.world, x + offset_x, y + offset_y)}"
         )
 
-    # new_state = state._replace(cost=5 * seen_by_guard_num(state))
-    new_state = state._replace(
+    new_state = state._replace(cost=state.cost + 5 * seen_by_guard_num(state))
+    new_state = new_state._replace(
         position=(x + offset_x, y + offset_y),
-        cost=state.cost + 1 + 5 * seen_by_guard_num(state),
     )
+    new_state = new_state._replace(cost=state.cost + 1 + 5 * seen_by_guard_num(state))
     vision = get_vision(new_state, world_example_tuple)
     for pos, content in vision:
         new_state = update_world_vision(new_state, pos[0], pos[1], content)
@@ -459,7 +459,6 @@ def phase1_run(hr, actions_to_do):
 
     for action in actions_to_do:
         hr_actions[action]()
-        # print(action)
 
 
 def main():
@@ -473,11 +472,14 @@ def main():
     hr = HitmanReferee()
     hr.start_phase1()
     phase1_run(hr, actions)
+
     complete_map_example = {}
 
     for y, row in enumerate(world_example):
         for x, value in enumerate(row):
             complete_map_example[(x, y)] = value
+
+    hr.send_content(complete_map_example)
 
     score_test = _, score, history, true_map = hr.end_phase1()
     pprint(score_test)
